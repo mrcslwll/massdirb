@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+
+# Esse script vai pegar os cinco primeiros subdomains da lista que for passada por stdin, gerar uma wordlist que
+# que funcione igual o nuclei, rodar o dirb com o ffuf e salvar os resultados numa pasta.
+
+subdomains = [] # Vou usar essa lista subdomains pra ficar mais fácil de entender o código depois.
+subdomains2 = []
+
+open('raw_results', 'w') # Garantir que o arquivo raw_results esteja vazio
+
+for line in sys.stdin: # Garantir que todos subdomains tenham http
+	if '.' in line: # Garantir que não seja uma linha vazia
+		if 'http' not in line:
+			line = 'https://' + line
+
+		subdomains.append(line)
+		subdomains2.append(line)
+
+wordlist = open('/home/' + os.getlogin() + '/Wordlists/small.txt', 'r').readlines() 
+
+k = 0
+
+step = 20 # Define o numero de subdomains que vão receber directory bruteforce de uma vez
+
+while True: # Estou usando while ao invés de for in porque a lista subdomains vai ser alterada constantemente 
+			# durante a execução e for não funcionaria.
+
+	if len(subdomains) == 0: # Tem que ter uma condição pra break já que estou usando while
+		break
+
+	temp_list = [] # Lista na qual o script vai armazenar os subdomains que sofrerão directory bruteforce 
+				   # nessa execução
+
+	# Preciso que o script pegue os 5 primeiros subdomains da lista pra rodar dirb e depois remova eles 
+	# pra continuar a execução com o resto da lista
+
+	if len(subdomains) > step:
+		for k in range(0, step):
+			
+			if subdomains[k] not in temp_list:  # Se eu fizer um loop interando com uma lista que está diminuindo
+				temp_list.append(subdomains[k]) # uma hora isso vai dar errado pq o k vai ser maior que o len da 
+												# lista. Agora ele checa se o subdomain já não está na temp_list
+												# e depois faço um loop interando pelos subdomains removendo os que
+												# já estão na temp_list
+	
+	for subdomain in subdomains:
+		if subdomain in temp_list:
+			subdomains.remove(subdomain)
+	
+
+	if len(subdomains) <= step: # Se a lista principal tiver menos que 6 subdomains, só inclui logo ela como temp_list
+		
+		for subdomain in subdomains:
+			if subdomain not in temp_list:
+				temp_list.append(subdomain)
+
+		subdomains = [] # len(subdomains) <= 5 só vai ser true no final da lista, então é necessário que 
+						# len(subdomains) vire 0 pra dar break na execução. Essa foi a melhor maneira que eu 
+						# achei de fazer isso, todas outras deram errado.
+
+
+	# Pegar os subdomains dessa execução e fazer uma wordlist pra eles
+
+	temp_wordlist = open('temp_wordlist', 'w')
+
+	for word in wordlist:
+		for subdomain in temp_list:
+			temp_wordlist.write(subdomain.rstrip() + '/' + word)
+
+
+	temp_wordlist.close()
+
+	# Rodar ffuf na wordlist criada
+	os.system('ffuf -w temp_wordlist -u FUZZ -r >> raw_results')
+
+
+	
+# Criar uma pasta pra cada subdomain e cria arquivos lá
+for subdomain in subdomains2:
+	subdomain = subdomain.rstrip()
+
+	# Cria a pasta subdomains_dir caso ela não exista
+	if not os.path.isdir("subdomains_dir"):
+		os.system('mkdir subdomains_dir')
+
+	# Primeiro tem que tirar o http do subdomain
+	if 'https://' in subdomain:
+		subdomain_splited  = subdomain.split('https://')[1].rstrip() 
+									# Vou criar uma nova variável porque preciso do
+									# subdomain com http depois pro grep
+
+	if 'http://' in subdomain:
+		subdomain_splited = subdomain.split('http://')[1].rstrip()
+
+	directory = "subdomains_dir/" + subdomain_splited
+
+	# Cria a pasta do subdomain
+	if not os.path.isdir(directory):
+		os.system("mkdir " + directory)
+
+	# Usa grep pra criar um arquivo dentro da pasta contendo só os resultados daquele subdomain
+	os.system('cat raw_results | sort -u | grep ' + subdomain + ' > ' + directory + "/raw_results")
+
+	# Abre o arquivo raw_results pra criar outro que só tenha o url, sem o resto das coisas que o FFUF faz
+	raw_results = open(directory + '/raw_results', 'r')
+
+	dirb_results = open(directory + '/dirb_results', 'w')
+
+	for line in raw_results:
+		try:
+			dirb_results.write(line.split('[Status: ')[0])
+		except:
+			pass
+
+	dirb_results.close()
+
+
+os.system('rm raw_results*')
+os.system('rm temp_wordlist')
